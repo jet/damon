@@ -1,4 +1,10 @@
+# github.com/natefinch/lumberjack v2.0.0+incompatible
+github.com/natefinch/lumberjack
 # github.com/pkg/errors v0.8.0
 github.com/pkg/errors
+# github.com/rs/zerolog v1.9.1
+github.com/rs/zerolog
+github.com/rs/zerolog/internal/cbor
+github.com/rs/zerolog/internal/json
 # golang.org/x/sys v0.0.0-20180909124046-d0be0721c37e
 golang.org/x/sys/windows
