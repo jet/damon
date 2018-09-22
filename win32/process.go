@@ -47,6 +47,19 @@ type ProcessResult struct {
 	EndTime    time.Time
 }
 
+type ProcessMemoryInfo struct {
+	PageFaultCount             uint32
+	PeakWorkingSetSize         uint64
+	WorkingSetSize             uint64
+	QuotaPeakPagedPoolUsage    uint64
+	QuotaPagedPoolUsage        uint64
+	QuotaPeakNonPagedPoolUsage uint64
+	QuotaNonPagedPoolUsage     uint64
+	PagefileUsage              uint64
+	PeakPagefileUsage          uint64
+	PrivateUsage               uint64
+}
+
 // Start running the process command
 // Use Wait to block until the process completes
 func (p *Process) Start() error {
@@ -88,6 +101,30 @@ func (p *Process) AffinityMask() (AffinityMask, AffinityMask, error) {
 		return AffinityMask(pam), AffinityMask(sam), err
 	}
 	return 0, 0, ErrProcessNotStarted
+}
+
+func (p *Process) MemoryInfo() (ProcessMemoryInfo, error) {
+	phProc, err := openProcess(_PROCESS_QUERY_INFORMATION|_PROCESS_VM_READ, false, p.Pid())
+	if err != nil {
+		return ProcessMemoryInfo{}, err
+	}
+	defer CloseHandleLogErr(*phProc, "win32: failed to close process handle")
+	minfo, err := getProcessMemoryInfo(*phProc)
+	if err != nil {
+		return ProcessMemoryInfo{}, err
+	}
+	return ProcessMemoryInfo{
+		PageFaultCount:             minfo.PageFaultCount,
+		PeakWorkingSetSize:         uint64(minfo.PeakWorkingSetSize),
+		WorkingSetSize:             uint64(minfo.WorkingSetSize),
+		QuotaPeakPagedPoolUsage:    uint64(minfo.QuotaPeakPagedPoolUsage),
+		QuotaPagedPoolUsage:        uint64(minfo.QuotaPagedPoolUsage),
+		QuotaPeakNonPagedPoolUsage: uint64(minfo.QuotaPeakNonPagedPoolUsage),
+		QuotaNonPagedPoolUsage:     uint64(minfo.QuotaNonPagedPoolUsage),
+		PagefileUsage:              uint64(minfo.PagefileUsage),
+		PeakPagefileUsage:          uint64(minfo.PeakPagefileUsage),
+		PrivateUsage:               uint64(minfo.PrivateUsage),
+	}, nil
 }
 
 // StartSuspended starts the process with the main thread suspended

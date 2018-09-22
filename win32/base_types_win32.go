@@ -11,6 +11,7 @@ var (
 	kernel32DLL = syscall.NewLazyDLL("kernel32.dll")
 	advapi32DLL = syscall.NewLazyDLL("advapi32.dll")
 	userenvDLL  = syscall.NewLazyDLL("userenv.dll")
+	psapiDLL    = syscall.NewLazyDLL("psapi.dll")
 )
 
 // Types Reference: https://docs.microsoft.com/en-us/windows/desktop/WinProg/windows-data-types

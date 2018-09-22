@@ -12,6 +12,7 @@ var (
 	procGetProcessAffinityMask   = kernel32DLL.NewProc("GetProcessAffinityMask")
 	procSetProcessAffinityMask   = kernel32DLL.NewProc("SetProcessAffinityMask")
 	procOpenProcess              = kernel32DLL.NewProc("OpenProcess")
+	procGetProcessMemoryInfo     = psapiDLL.NewProc("GetProcessMemoryInfo")
 )
 
 // Process Acecss Rights
@@ -146,4 +147,52 @@ func setProcessAffinityMask(hProcess syscall.Handle, sam uint32) error {
 		uintptr(unsafe.Pointer(&sam)),
 	)
 	return testReturnCodeNonZero(ret, errno)
+}
+
+// typedef struct _PROCESS_MEMORY_COUNTERS_EX {
+// 	DWORD  cb;
+// 	DWORD  PageFaultCount;
+// 	SIZE_T PeakWorkingSetSize;
+// 	SIZE_T WorkingSetSize;
+// 	SIZE_T QuotaPeakPagedPoolUsage;
+// 	SIZE_T QuotaPagedPoolUsage;
+// 	SIZE_T QuotaPeakNonPagedPoolUsage;
+// 	SIZE_T QuotaNonPagedPoolUsage;
+// 	SIZE_T PagefileUsage;
+// 	SIZE_T PeakPagefileUsage;
+// 	SIZE_T PrivateUsage;
+// } PROCESS_MEMORY_COUNTERS_EX;
+// https://docs.microsoft.com/en-us/windows/desktop/api/psapi/ns-psapi-_process_memory_counters_ex
+type _PROCESS_MEMORY_COUNTERS_EX struct {
+	cb                         uint32
+	PageFaultCount             uint32
+	PeakWorkingSetSize         uintptr
+	WorkingSetSize             uintptr
+	QuotaPeakPagedPoolUsage    uintptr
+	QuotaPagedPoolUsage        uintptr
+	QuotaPeakNonPagedPoolUsage uintptr
+	QuotaNonPagedPoolUsage     uintptr
+	PagefileUsage              uintptr
+	PeakPagefileUsage          uintptr
+	PrivateUsage               uintptr
+}
+
+// BOOL GetProcessMemoryInfo(
+//   HANDLE                   Process,
+//   PPROCESS_MEMORY_COUNTERS ppsmemCounters,
+//   DWORD                    cb
+// );
+// https://docs.microsoft.com/en-us/windows/desktop/api/psapi/nf-psapi-getprocessmemoryinfo
+func getProcessMemoryInfo(hProc syscall.Handle) (*_PROCESS_MEMORY_COUNTERS_EX, error) {
+	var info _PROCESS_MEMORY_COUNTERS_EX
+	info.cb = uint32(unsafe.Sizeof(info))
+	ret, _, errno := procGetProcessMemoryInfo.Call(
+		uintptr(hProc),
+		uintptr(unsafe.Pointer(&info)),
+		uintptr(unsafe.Sizeof(info)),
+	)
+	if err := testReturnCodeNonZero(ret, errno); err != nil {
+		return nil, err
+	}
+	return &info, nil
 }
