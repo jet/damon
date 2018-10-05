@@ -12,6 +12,7 @@ var (
 	advapi32DLL = syscall.NewLazyDLL("advapi32.dll")
 	userenvDLL  = syscall.NewLazyDLL("userenv.dll")
 	psapiDLL    = syscall.NewLazyDLL("psapi.dll")
+	iphlpapiDLL = syscall.NewLazyDLL("iphlpapi.dll")
 )
 
 // Types Reference: https://docs.microsoft.com/en-us/windows/desktop/WinProg/windows-data-types
@@ -35,6 +36,8 @@ type (
 
 const (
 	NULL uintptr = 0
+
+	ANY_SIZE int = 1
 
 	// Error Codes
 	NO_ERROR               uintptr = 0
