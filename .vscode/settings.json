@@ -1,0 +1,6 @@
+{
+    "go.lintTool": "golangci-lint",
+    "go.lintFlags": [
+        "--config=${workspaceRoot}\\.golangci.yml"
+    ]
+}

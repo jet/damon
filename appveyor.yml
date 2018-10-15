@@ -1,0 +1,18 @@
+---
+version: "build-{branch}-{build}"
+clone_folder: c:\gopath\src\github.com\jet\damon
+environment:
+  GOPATH: c:\gopath
+  GOBIN: c:\gopath\bin
+image: Visual Studio 2017
+install:
+  - cmd: set PATH=%GOBIN%;c:\go\bin;%PATH%
+  - cmd: echo %Path%
+  - cmd: go version
+  - cmd: go env
+test_script:
+- cmd: powershell.exe -ExecutionPolicy Bypass .\make.ps1 -Lint
+- cmd: powershell.exe -ExecutionPolicy Bypass .\make.ps1 -Test
+build_script:
+- cmd: powershell.exe -ExecutionPolicy Bypass .\make.ps1 -Build
+deploy: off

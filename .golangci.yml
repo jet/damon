@@ -1,0 +1,12 @@
+---
+run:
+  issues-exit-code: 1
+  skip-files:
+  - '.*_win32.go$' # Windows API has a lot of C-isms
+  skip-dirs:
+  - 'testcmd'
+
+output:
+  format: tab
+  print-issued-lines: true
+  print-linter-name: true
