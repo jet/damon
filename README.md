@@ -24,8 +24,8 @@ Damon uses environment variables to configure process monitoring and resource co
 
 ### Constraint Options
 
-- `DAMON_ENFORCE_CPU_LIMIT`: When set to `Y` - it enforces CPU constraints on the wrapped process.
-- `DAMON_ENFORCE_MEMORY_LIMIT`: When set to `Y` - it enforces memory limits on the wrapped process.
+- `DAMON_ENFORCE_CPU_LIMIT`: When set to `Y` - it enforces CPU constraints on the wrapped process. Set to 'N' to disable CPU-rate limits. (Default: 'Y')
+- `DAMON_ENFORCE_MEMORY_LIMIT`: When set to `Y` - it enforces memory limits on the wrapped process. Set to 'N' to disable memory limits. (Default: 'Y')
 - `DAMON_CPU_LIMIT`: The CPU Limit in MHz. Defaults to `NOMAD_CPU_LIMIT`.
 - `DAMON_MEMORY_LIMIT`: The Memory Limit in MB. Defaults to `NOMAD_MEMORY_LIMIT`.
 - `DAMON_RESTRICTED_TOKEN`: When set to `Y` - it runs the wrapped process with a [Restricted Token](https://docs.microsoft.com/en-us/windows/desktop/SecAuthZ/restricted-tokens):
