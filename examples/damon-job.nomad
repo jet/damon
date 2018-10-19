@@ -25,18 +25,15 @@ job "damon-job" {
                 memory = 1024
                 network {
                     mbits = 100
-                    
+
                     ## For your own http endpoint
                     port "http" {}
-                    
+
                     ## For metrics exposed by Damon
                     port "damon" {}
                 }
             }
             env {
-                "DAMON_ENFORCE_CPU_LIMIT"    = "Y
-                "DAMON_ENFORCE_MEMORY_LIMIT" = "Y"
-                
                 ## Example of overriding NOMAD_CPU_LIMIT to give it more CPU than allocated
                 "DAMON_CPU_LIMIT" = "2048"
             }
@@ -47,7 +44,7 @@ job "damon-job" {
                     type     = "http"
                     path     = "/health"
                     interval = "10s"
-                    timeout  = "2s"   
+                    timeout  = "2s"
                 }
             }
             ## For damon's metrics endpoint
