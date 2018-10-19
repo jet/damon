@@ -294,6 +294,7 @@ func (c *Container) pollStats() {
 
 func (c *Container) Wait(exitCh <-chan struct{}) (Result, error) {
 	pr, err := c.proc.Wait(exitCh)
+	c.Logger.Logf("process exited: %d", pr.ExitStatus)
 	if err != nil {
 		return Result{}, err
 	}
