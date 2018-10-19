@@ -24,11 +24,11 @@ var globalLogger atomic.Value
 func SetLogger(l Logger) {
 	globalLoggerLock.Lock()
 	defer globalLoggerLock.Unlock()
-	globalLogger.Store(l)
+	globalLogger.Store(logWrapper{logger: l})
 }
 
 func init() {
-	SetLogger(noopLogger{})
+	SetLogger(logWrapper{logger: noopLogger{}})
 }
 
 func logger() Logger {
@@ -48,6 +48,22 @@ func LogError(err error, msg string) {
 	if err != nil {
 		logger().Error(err, msg)
 	}
+}
+
+type logWrapper struct {
+	logger Logger
+}
+
+func (n logWrapper) Logf(format string, v ...interface{}) {
+	n.logger.Logf(format, v...)
+}
+
+func (n logWrapper) Logln(v ...interface{}) {
+	n.logger.Logln(v...)
+}
+
+func (n logWrapper) Error(err error, msg string) {
+	n.logger.Error(err, msg)
 }
 
 // noopLogger silently discards logs
