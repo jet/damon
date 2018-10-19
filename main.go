@@ -55,6 +55,7 @@ func main() {
 	if err != nil {
 		logger.Error(err, "unable to load container configuration from environment variables")
 	}
+	win32.SetLogger(logger)
 	resources := win32.GetSystemResources()
 	labels := make(map[string]string)
 	for k, v := range fields {
