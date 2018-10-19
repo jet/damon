@@ -1,3 +1,5 @@
+[![Build status](https://ci.appveyor.com/api/projects/status/412auj8v5yxj1nx0/branch/master?svg=true)](https://ci.appveyor.com/project/Jet/damon/branch/master)
+
 # Damon
 
 Damon is a supervisor program to constrain windows executables that are run under the `raw_exec` driver in Nomad.
