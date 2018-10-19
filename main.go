@@ -83,24 +83,27 @@ func main() {
 		logger.Error(err, "damon startup error")
 		os.Exit(1)
 	}
-	mux := http.NewServeMux()
-	mux.Handle(MetricsEndpoint(), m.Handler())
-	srv := &http.Server{
-		Addr:    ListenAddress(),
-		Handler: mux,
-	}
-	go logger.Error(srv.ListenAndServe(), "error closing server")
-	logger.Logf("metrics on http://%s/%s", srv.Addr, MetricsEndpoint())
 	exitCh := make(chan struct{})
 	sigCh := make(chan os.Signal)
 	signal.Notify(sigCh)
 	go func() {
 		<-sigCh
-		srv.Close()
 		close(exitCh)
 	}()
+	if addr := ListenAddress(); addr != "" {
+		go func() {
+			endpoint := MetricsEndpoint()
+			mux := http.NewServeMux()
+			mux.Handle(endpoint, m.Handler())
+			srv := &http.Server{
+				Addr: addr,
+				Handler: mux,
+			}
+			logger.Logf("metrics on http://%s/%s",addr,endpoint)
+			logger.Error(srv.ListenAndServe(),"error closing http server")
+		}()
+	}
 	pr, err := c.Wait(exitCh)
-
 	if err != nil {
 		logger.WithFields(map[string]interface{}{
 			"version":  vinfo,
