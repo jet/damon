@@ -169,8 +169,10 @@ func (p *Process) Wait(exitCh <-chan struct{}) (*ProcessResult, error) {
 	go func() {
 		select {
 		case <-exitCh:
+			Logf("win32: command termination requested")
 			// received a request to exit the process
 		case <-doneCh:
+			Logf("win32: command completed")
 			// done before exit signal received
 			return
 		}
@@ -182,6 +184,7 @@ func (p *Process) Wait(exitCh <-chan struct{}) (*ProcessResult, error) {
 		}
 		select {
 		case <-doneCh:
+			Logf("win32: command completed")
 			return
 		case <-time.After(p.ExitTimeout):
 			// give up -- send kill signal
@@ -190,7 +193,10 @@ func (p *Process) Wait(exitCh <-chan struct{}) (*ProcessResult, error) {
 	}()
 	go func() {
 		defer close(doneCh)
+		Logf("win32: Cmd.Wait")
 		err := p.Cmd.Wait()
+		Logf("win32: Cmd.Wait complete")
+		LogError(err, "win32: Cmd.Wait error")
 		p.mu.Lock()
 		p.ended = true
 		p.endTime = time.Now()
@@ -200,6 +206,7 @@ func (p *Process) Wait(exitCh <-chan struct{}) (*ProcessResult, error) {
 		p.mu.Unlock()
 	}()
 	<-doneCh
+	Logf("win32: process completed")
 	res := &ProcessResult{
 		StartTime: p.startTime,
 		EndTime:   p.endTime,
