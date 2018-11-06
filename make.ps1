@@ -20,6 +20,9 @@ Param(
     [string]$OutFile = "damon.exe"
 )
 
+# Force TLS 1.2
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
 $GOLANG_LINT_VERSION="1.10.2"
 
 ## Setup
