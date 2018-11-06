@@ -6,10 +6,26 @@
 pool:
   vmImage: 'win1803'
 
+variables:
+  GOBIN:  '$(GOPATH)\bin' # Go binaries path
+  GOPATH: '$(system.defaultWorkingDirectory)\go' # Go workspace path
+  modulePath: '$(GOPATH)\src\github.com\jet\damon' # Path to the module's code
+
 steps:
+- powershell: |
+    New-Item -Path "$(GOBIN)" -Type Directory
+    New-Item -Path "$(GOPATH)/pkg" -Type Directory
+    New-Item -Path "$(modulePath)" -Type Directory
+    Move-Item -Path .\ -Destination "$(modulePath)"
+    echo '##vso[task.prependpath]$(GOBIN)'
+    echo '##vso[task.prependpath]$(GOROOT)/bin'
+  displayName: 'Set up the Go workspace'
 - powershell: .\make.ps1 -Lint
   displayName: 'Lint Code'
+  workingDirectory: '$(modulePath)'
 - powershell: .\make.ps1 -Build
   displayName: 'Build'
+  workingDirectory: '$(modulePath)'
 - powershell: .\make.ps1 -Test
   displayName: 'Run Tests'
+  workingDirectory: '$(modulePath)'
