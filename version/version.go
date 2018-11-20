@@ -15,7 +15,7 @@ var (
 	Number = "0.1.0"
 
 	// PreRelease is the pre-release information for this version
-	PreRelease = "dev"
+	PreRelease = ""
 
 	// BuildMetadata is the build-metadata of this version
 	BuildMetadata = ""
