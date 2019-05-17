@@ -169,7 +169,7 @@ func openProcessMainThreadForResume(pid uint32) (*syscall.Handle, error) {
 		ok, err = thread32Next(hSnapshot, &te32)
 	}
 	if te32.th32ThreadID != 0 {
-		phThread, err := openThread(_THREAD_RESUME, false, te32.th32ThreadID)
+		phThread, err := openThread(_THREAD_SUSPEND_RESUME, false, te32.th32ThreadID)
 		if err != nil {
 			return nil, errors.Wrapf(err, "win32: openThread failed")
 		}
