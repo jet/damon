@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/jet/damon/log"
 	"github.com/jet/damon/win32"
 	"github.com/pkg/errors"
 )
@@ -33,10 +32,15 @@ type Config struct {
 const MBToBytes uint64 = 1024 * 1024
 const MinimumCPUMHz = 100
 
+type Logger interface {
+	Logln(v ...interface{})
+	Error(err error, msg string)
+}
+
 type Container struct {
 	Name string
 	Config
-	Logger      log.Logger
+	Logger      Logger
 	Command     *exec.Cmd
 	OnStats     OnStatsFn
 	OnViolation OnViolationFn
@@ -294,7 +298,7 @@ func (c *Container) pollStats() {
 
 func (c *Container) Wait(exitCh <-chan struct{}) (Result, error) {
 	pr, err := c.proc.Wait(exitCh)
-	c.Logger.Logf("process exited: %d", pr.ExitStatus)
+	c.Logger.Logln(fmt.Sprintf("process exited: %d", pr.ExitStatus))
 	if err != nil {
 		return Result{}, err
 	}
