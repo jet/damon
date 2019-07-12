@@ -77,7 +77,7 @@ if($Build) {
     $ldflags = "$ldflags -X github.com/jet/damon/version.BuildTime=${buildTimestamp}"
     
     Write-Host $gcflags
-    go.exe build -o $OutFile -ldflags="$ldflags" .
+    go.exe build -o $OutFile -ldflags="$ldflags" ./cmd/standalone
     exit $LASTEXITCODE
 }
 

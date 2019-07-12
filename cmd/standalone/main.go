@@ -96,11 +96,11 @@ func main() {
 			mux := http.NewServeMux()
 			mux.Handle(endpoint, m.Handler())
 			srv := &http.Server{
-				Addr: addr,
+				Addr:    addr,
 				Handler: mux,
 			}
-			logger.Logf("metrics on http://%s/%s",addr,endpoint)
-			logger.Error(srv.ListenAndServe(),"error closing http server")
+			logger.Logf("metrics on http://%s/%s", addr, endpoint)
+			logger.Error(srv.ListenAndServe(), "error closing http server")
 		}()
 	}
 	pr, err := c.Wait(exitCh)
