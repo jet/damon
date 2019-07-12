@@ -72,7 +72,7 @@ type ProcessStats struct {
 type MemoryStats struct {
 	WorkingSetSizeBytes uint64
 	PrivateUsageBytes   uint64
-	PageFaultCount uint64
+	PageFaultCount      uint64
 }
 
 type CPUStats struct {
@@ -156,16 +156,16 @@ func (c *Container) Start() error {
 		}
 		nli := &win32.NotificationLimitInformation{
 			CPURateLimit: &win32.NotificationRateLimitTolerance{
-				Level: win32.ToleranceLow,
+				Level:    win32.ToleranceLow,
 				Interval: win32.ToleranceIntervalLong,
 			},
 		}
 		crci := &win32.CPURateControlInformation{
 			Rate: &win32.CPUMaxRateInformation{
 				HardCap: true,
-				Rate: win32.MHzToCPURate(uint64(c.Config.CPUMHzLimit)),
+				Rate:    win32.MHzToCPURate(uint64(c.Config.CPUMHzLimit)),
 			},
-			Notify: true,	
+			Notify: true,
 		}
 		if err = c.killOnError(job.SetInformation(nli)); err != nil {
 			c.closeLogError(job, "failed to close JobObject")
@@ -272,7 +272,7 @@ func (c *Container) pollStats() {
 				MemoryStats: MemoryStats{
 					WorkingSetSizeBytes: meminfo.WorkingSetSize,
 					PrivateUsageBytes:   meminfo.PrivateUsage,
-					PageFaultCount: uint64(meminfo.PageFaultCount),
+					PageFaultCount:      uint64(meminfo.PageFaultCount),
 				},
 				IOStats: IOStats{
 					TotalIOOperations:      info.IO.OtherOperationCount + info.IO.ReadOperationCount + info.IO.WriteOperationCount,
