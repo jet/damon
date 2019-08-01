@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"time"
 
 	"github.com/jet/damon/container"
 	"github.com/jet/damon/log"
@@ -55,6 +56,7 @@ func main() {
 	if err != nil {
 		logger.Error(err, "unable to load container configuration from environment variables")
 	}
+	ccfg.Logger = clogger
 	win32.SetLogger(logger)
 	resources := win32.GetSystemResources()
 	labels := make(map[string]string)
@@ -68,21 +70,12 @@ func main() {
 		Labels:     labels,
 	}
 	m.Init()
-	c := container.Container{
-		Command: cmd,
-		Config:  ccfg,
-		Logger:  clogger,
-		OnStats: func(s container.ProcessStats) {
-			m.OnStats(s)
-		},
-		OnViolation: func(v container.LimitViolation) {
-			m.OnViolation(v)
-		},
-	}
-	if err := c.Start(); err != nil {
+	c, err := container.RunContained(cmd, &ccfg)
+	if err != nil {
 		logger.Error(err, "damon startup error")
 		os.Exit(1)
 	}
+	start := time.Now()
 	exitCh := make(chan struct{})
 	sigCh := make(chan os.Signal)
 	signal.Notify(sigCh)
@@ -111,14 +104,14 @@ func main() {
 			"cmdline":  os.Args,
 		}).Error(err, "process exited with an error")
 	}
-
+	end := time.Now()
 	logger.WithFields(map[string]interface{}{
 		"version":     vinfo,
 		"revision":    version.GitCommit,
 		"cmdline":     os.Args,
-		"start":       pr.Start,
-		"end":         pr.End,
-		"run_time":    pr.End.Sub(pr.Start),
+		"start":       start,
+		"end":         end,
+		"run_time":    end.Sub(start),
 		"exit_status": pr.ExitCode,
 	}).Logln("damon exiting")
 	os.Exit(pr.ExitCode)

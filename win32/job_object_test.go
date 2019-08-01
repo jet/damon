@@ -13,12 +13,12 @@ import (
 func TestJobObject(t *testing.T) {
 	job, err := CreateJobObject("testjob")
 	if err != nil {
-		t.Fatal("CreateJobObject", err)
+		t.Error("CreateJobObject", err)
 	}
 	if err = job.SetInformation(&ExtendedLimitInformation{
 		KillOnJobClose: true,
 	}); err != nil {
-		t.Fatal("ExtendedLimitInformation", err)
+		t.Error("ExtendedLimitInformation", err)
 	}
 	if err = job.SetInformation(&CPURateControlInformation{
 		Rate: &CPUMaxRateInformation{
@@ -26,7 +26,7 @@ func TestJobObject(t *testing.T) {
 			Rate:    MHzToCPURate(2048),
 		},
 	}); err != nil {
-		t.Fatal("CPURateControlInformation/MaxRate", err)
+		t.Error("CPURateControlInformation/MaxRate", err)
 	}
 	if err = job.SetInformation(&NotificationLimitInformation{
 		CPURateLimit: &NotificationRateLimitTolerance{
@@ -42,24 +42,24 @@ func TestJobObject(t *testing.T) {
 			Interval: ToleranceIntervalShort,
 		},
 	}); err != nil {
-		t.Fatal("NotificationLimitInformation", err)
+		t.Error("NotificationLimitInformation", err)
 	}
-	if err = job.SetInformation(&IORateControlInformation{
-		MaxBandwidth: 10,
-		MaxIOPS:      1,
-	}); err != nil {
-		t.Fatal("IORateControlInformation", err)
-	}
-	if err = job.SetInformation(&NetRateControlInformation{
-		MaxBandwidth: 1,
-		DSCPTag:      1,
-	}); err != nil {
-		t.Fatal("NetRateControlInformation", err)
-	}
+	// if err = job.SetInformation(&IORateControlInformation{
+	// 	MaxBandwidth: 10,
+	// 	MaxIOPS:      1,
+	// }); err != nil {
+	// 	t.Error("IORateControlInformation", err)
+	// }
+	// if err = job.SetInformation(&NetRateControlInformation{
+	// 	MaxBandwidth: 1,
+	// 	DSCPTag:      1,
+	// }); err != nil {
+	// 	t.Error("NetRateControlInformation", err)
+	// }
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
-	cmd := exec.Command(SetupTestExe(t), "netio", "30s")
+	cmd := exec.Command(SetupTestExe(t), "cpu", "30s")
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
@@ -85,15 +85,11 @@ func TestJobObject(t *testing.T) {
 	}
 	cmd.Env = envs
 
-	proc, err := CreateProcessWithToken(cmd, rToken)
+	proc, err := StartProcess(cmd, AccessToken(rToken), Suspended)
 	if err != nil {
-		t.Fatal("CreateProcessWithToken", err)
+		t.Fatal("StartProcess()", err)
 	}
-
-	err = proc.StartSuspended()
-	if err != nil {
-		t.Fatal("proc.StartSuspended error", err)
-	}
+	startTime := time.Now()
 
 	pa, sa, err := proc.AffinityMask()
 	if err != nil {
@@ -128,7 +124,7 @@ func TestJobObject(t *testing.T) {
 				if err := job.GetInformation(ba); err != nil {
 					t.Errorf("JobObjectBasicAndIOAccounting error: %v", err)
 				} else {
-					dur := proc.RunningDuration() * time.Duration(runtime.NumCPU())
+					dur := time.Since(startTime) * time.Duration(runtime.NumCPU())
 					t.Logf(`{"tt":"%v","ut":"%v","kt":"%v","up":%.3f,"kp":%.3f,"rop":%d,"wop":%d,"oop":%d,"rtx":%d,"wtx":%d,"otx":%d}`,
 						dur,
 						ba.Basic.TotalUserTime,

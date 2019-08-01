@@ -1,37 +1,43 @@
 #!powershell
 [CmdletBinding()]
 Param(    
-    [Parameter(ParameterSetName='Test')]
+    [Parameter(ParameterSetName = 'Test')]
     [switch]$Test,
 
-    [Parameter(ParameterSetName='Test')]
+    [Parameter(ParameterSetName = 'Test')]
     [switch]$VerboseOutput,
 
-    [Parameter(ParameterSetName='Test')]
+    [Parameter(ParameterSetName = 'Test')]
     [string]$CoverProfile = "cover.out",
 
-    [Parameter(ParameterSetName='Lint')]
+    [Parameter(ParameterSetName = 'Lint')]
     [switch]$Lint,
 
-    [Parameter(ParameterSetName='Build')]
+    [Parameter(ParameterSetName = 'Build')]
     [switch]$Build,
 
-    [Parameter(ParameterSetName='Build')]
+    [Parameter(ParameterSetName = 'Build')]
     [string]$OutFile = "damon.exe"
 )
 
-$GOLANG_LINT_VERSION="1.10.2"
+if ($env:CONTAINER -eq "Y" -and $env:DOCKER -ne "no" ) {
+    & docker run --isolation=hyperv -t --rm -e "APPVEYOR" -e "CONTAINER=N" -e "DOCKER=yes" -v "${PSScriptRoot}:C:\workspace" -w "C:\workspace" golang:1.12 "powershell.exe" $MyInvocation.Line
+    exit
+}
+
+
+$GOLANG_LINT_VERSION = "1.10.2"
 
 ## Setup
-$env:GOOS="windows"
-$env:GOARCH="amd64"
-$env:GO111MODULE="on"
-$env:GOFLAGS="-mod=vendor"
+$env:GOOS = "windows"
+$env:GOARCH = "amd64"
+$env:GO111MODULE = "on"
+$env:GOFLAGS = "-mod=vendor"
 
 ## Lint Code
 if ($Lint) {
     ## Install Linter
-    if( -not (Test-Path -Path $env:GOPATH\bin\golangci-lint.exe)) {
+    if ( -not (Test-Path -Path $env:GOPATH\bin\golangci-lint.exe)) {
         Mkdir -Path  $env:GOPATH\bin | Out-Null
         Invoke-WebRequest -OutFile $env:GOPATH\bin\golangci-lint.zip -Uri "https://github.com/golangci/golangci-lint/releases/download/v${GOLANG_LINT_VERSION}/golangci-lint-${GOLANG_LINT_VERSION}-windows-amd64.zip"
         Expand-Archive $env:GOPATH\bin\golangci-lint.zip -DestinationPath $env:GOPATH\bin
@@ -43,30 +49,30 @@ if ($Lint) {
 }
 
 ## Run Test + Coverage
-if($Test) {
+if ($Test) {
     Write-Host "=== Test ==="
     $env:TEST_EXE_PATH = "$env:ALLUSERSPROFILE\test-damon.exe"
     Write-Host "Compiling ${env:TEST_EXE_PATH}"
     go.exe build -o $env:TEST_EXE_PATH ./testcmd/
-    if($env:APPVEYOR -eq "True") {
-        $env:TEST_WIN32_USER_NAME="testuser"
-        $env:TEST_WIN32_USER_PASSWORD="test123!"
+    if ($env:APPVEYOR -eq "True") {
+        $env:TEST_WIN32_USER_NAME = "testuser"
+        $env:TEST_WIN32_USER_PASSWORD = "test123!"
         $user = Get-LocalUser -Name testuser -ErrorAction SilentlyContinue
-        if(-not $user) {
+        if (-not $user) {
             Write-Host "Create user $env:TEST_WIN32_USER_NAME"
             $password = ConvertTo-SecureString -AsPlainText -String $env:TEST_WIN32_USER_PASSWORD -Force
             New-LocalUser -Name $env:TEST_WIN32_USER_NAME -Password $password | Out-Null
             Write-Host "Assign 'Logon as Batch' rights"
-            Start-Process -FilePath $env:TEST_EXE_PATH -ArgumentList "batch_login",$env:TEST_WIN32_USER_NAME | Wait-Process  
+            Start-Process -FilePath $env:TEST_EXE_PATH -ArgumentList "batch_login", $env:TEST_WIN32_USER_NAME | Wait-Process  
         }
     } 
-    $v = if($VerboseOutput) { "-v" } else { "" }
+    $v = if ($VerboseOutput) { "-v" } else { "" }
     go.exe test $v -coverprofile $CoverProfile ./...
     exit $LASTEXITCODE
 }
 
 ## Run Build
-if($Build) {
+if ($Build) {
     $gitRevision = $(git rev-parse HEAD)
     $gitDescribe = $(git describe 2> $null)
     $buildTimestamp = $(Get-Date -UFormat "%Y-%m-%dT%T%Z")

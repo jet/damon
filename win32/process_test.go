@@ -28,12 +28,9 @@ func TestRunProcess(t *testing.T) {
 	}
 	cmd.Stdout = buf
 	defer token.Close()
-	proc, err := CreateProcessWithToken(cmd, token)
+	proc, err := StartProcess(cmd, AccessToken(token))
 	if err != nil {
-		t.Fatal("CreateProcessWithToken", err)
-	}
-	if err = proc.Start(); err != nil {
-		t.Fatal("proc.Start()", err)
+		t.Fatal("StartProcess()", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -57,12 +54,9 @@ func TestRunProcessWaitSignal(t *testing.T) {
 	}
 	cmd.Stdout = buf
 	defer token.Close()
-	proc, err := CreateProcessWithToken(cmd, token)
+	proc, err := StartProcess(cmd, AccessToken(token))
 	if err != nil {
-		t.Fatal("CreateProcessWithToken", err)
-	}
-	if err = proc.Start(); err != nil {
-		t.Fatal("proc.Start()", err)
+		t.Fatal("StartProcess()", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -91,12 +85,9 @@ func TestRunProcessWaitNoSignal(t *testing.T) {
 	}
 	cmd.Stdout = buf
 	defer token.Close()
-	proc, err := CreateProcessWithToken(cmd, token)
+	proc, err := StartProcess(cmd, AccessToken(token))
 	if err != nil {
-		t.Fatal("CreateProcessWithToken", err)
-	}
-	if err = proc.Start(); err != nil {
-		t.Fatal("proc.Start()", err)
+		t.Fatal("StartProcess()", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
