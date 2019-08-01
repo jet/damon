@@ -28,7 +28,7 @@ func SetLogger(l Logger) {
 }
 
 func init() {
-	SetLogger(logWrapper{logger: noopLogger{}})
+	SetLogger(logWrapper{})
 }
 
 func logger() Logger {
@@ -55,28 +55,22 @@ type logWrapper struct {
 }
 
 func (n logWrapper) Logf(format string, v ...interface{}) {
+	if n.logger == nil {
+		return
+	}
 	n.logger.Logf(format, v...)
 }
 
 func (n logWrapper) Logln(v ...interface{}) {
+	if n.logger == nil {
+		return
+	}
 	n.logger.Logln(v...)
 }
 
 func (n logWrapper) Error(err error, msg string) {
+	if n.logger == nil {
+		return
+	}
 	n.logger.Error(err, msg)
-}
-
-// noopLogger silently discards logs
-type noopLogger struct{}
-
-func (n noopLogger) Logf(format string, v ...interface{}) {
-
-}
-
-func (n noopLogger) Logln(v ...interface{}) {
-
-}
-
-func (n noopLogger) Error(err error, msg string) {
-
 }
