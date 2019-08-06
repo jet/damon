@@ -66,9 +66,15 @@ type ProcessStats struct {
 }
 
 type MemoryStats struct {
-	WorkingSetSizeBytes uint64
-	PrivateUsageBytes   uint64
-	PageFaultCount      uint64
+	WorkingSetSizeBytes        uint64
+	PeakWorkingSetSizeBytes    uint64
+	PrivateUsageBytes          uint64
+	PeakPagefileUsageBytes     uint64
+	PeakPagedPoolUsageBytes    uint64
+	PagedPoolUsageBytes        uint64
+	PeakNonPagedPoolUsageBytes uint64
+	NonPagedPoolUsageBytes     uint64
+	PageFaultCount             uint64
 }
 
 type CPUStats struct {
@@ -258,9 +264,15 @@ func (c *Container) PollStats(fn func(stats ProcessStats)) {
 					TotalUserTime:   info.Basic.TotalUserTime,
 				},
 				MemoryStats: MemoryStats{
-					WorkingSetSizeBytes: meminfo.WorkingSetSize,
-					PrivateUsageBytes:   meminfo.PrivateUsage,
-					PageFaultCount:      uint64(meminfo.PageFaultCount),
+					WorkingSetSizeBytes:        meminfo.WorkingSetSize,
+					PeakWorkingSetSizeBytes:    meminfo.PeakWorkingSetSize,
+					PrivateUsageBytes:          meminfo.PrivateUsage,
+					PeakPagefileUsageBytes:     meminfo.PeakPagefileUsage,
+					NonPagedPoolUsageBytes:     meminfo.QuotaNonPagedPoolUsage,
+					PeakNonPagedPoolUsageBytes: meminfo.QuotaPeakNonPagedPoolUsage,
+					PagedPoolUsageBytes:        meminfo.QuotaPagedPoolUsage,
+					PeakPagedPoolUsageBytes:    meminfo.QuotaPeakPagedPoolUsage,
+					PageFaultCount:             uint64(meminfo.PageFaultCount),
 				},
 				IOStats: IOStats{
 					TotalIOOperations:      info.IO.OtherOperationCount + info.IO.ReadOperationCount + info.IO.WriteOperationCount,
