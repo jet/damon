@@ -301,6 +301,10 @@ func (c *Container) Wait(exitCh <-chan struct{}) (Result, error) {
 	}, pr.Err
 }
 
+func (c *Container) Shutdown(timeout time.Duration) error {
+	return c.proc.Shutdown(timeout)
+}
+
 func (c *Container) killOnError(err error) error {
 	if err != nil {
 		c.Logger.Error(c.proc.Kill(), "unable to kill child process")

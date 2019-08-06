@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -30,6 +31,10 @@ type Process struct {
 	osProcess   *os.Process
 	mu          sync.RWMutex
 	suspended   bool
+	doneCh      chan struct{}
+
+	resultLock sync.Mutex
+	result     atomic.Value
 }
 
 // ProcessResult is the result of the process after it completed
@@ -67,6 +72,10 @@ func (p *Process) AffinityMask() (AffinityMask, AffinityMask, error) {
 	return AffinityMask(pam), AffinityMask(sam), err
 }
 
+// MemoryInfo gets the process memory information
+//
+// There is probably a different way to get more granular memory metrics,
+// but we're avoiding WMI because in practice it had a tendency of blocking and crashing if the queries per second is too great
 func (p *Process) MemoryInfo() (ProcessMemoryInfo, error) {
 	phProc, err := openProcess(_PROCESS_QUERY_INFORMATION|_PROCESS_VM_READ, false, p.Pid())
 	if err != nil {
@@ -95,12 +104,22 @@ func (p *Process) MemoryInfo() (ProcessMemoryInfo, error) {
 // exitCh is used to signal the process to exit early
 // returns an error if the process was not started
 func (p *Process) Wait(exitCh <-chan struct{}) (*ProcessResult, error) {
+	// fast atomic check for existing result
+	if v := p.result.Load(); v != nil {
+		return v.(*ProcessResult), nil
+	}
+	p.resultLock.Lock()
+	defer p.resultLock.Unlock()
+	// there may have been another Wait that exited after this Lock
+	// so check again before doing the whole thing
+	if v := p.result.Load(); v != nil {
+		return v.(*ProcessResult), nil
+	}
 	type waitStatus struct {
 		State *os.ProcessState
 		Err   error
 	}
 	resultCh := make(chan waitStatus, 1)
-	doneCh := make(chan struct{})
 	if exitCh == nil {
 		exitCh = make(chan struct{}) // never exit
 	}
@@ -109,7 +128,7 @@ func (p *Process) Wait(exitCh <-chan struct{}) (*ProcessResult, error) {
 		case <-exitCh:
 			Logf("win32: command termination requested")
 			// received a request to exit the process
-		case <-doneCh:
+		case <-p.doneCh:
 			Logf("win32: command completed")
 			// done before exit signal received
 			return
@@ -121,7 +140,7 @@ func (p *Process) Wait(exitCh <-chan struct{}) (*ProcessResult, error) {
 			return
 		}
 		select {
-		case <-doneCh:
+		case <-p.doneCh:
 			Logf("win32: command completed")
 			return
 		case <-time.After(p.ExitTimeout):
@@ -130,7 +149,7 @@ func (p *Process) Wait(exitCh <-chan struct{}) (*ProcessResult, error) {
 		}
 	}()
 	go func() {
-		defer close(doneCh)
+		defer close(p.doneCh)
 		Logf("win32: Cmd.Wait")
 		state, err := p.osProcess.Wait()
 		Logf("win32: Cmd.Wait complete")
@@ -139,10 +158,12 @@ func (p *Process) Wait(exitCh <-chan struct{}) (*ProcessResult, error) {
 	}()
 	res := <-resultCh
 	Logf("win32: process completed")
-	return &ProcessResult{
+	pr := &ProcessResult{
 		Err:        res.Err,
 		ExitStatus: getExitCode(res.State, res.Err),
-	}, nil
+	}
+	p.result.Store(pr)
+	return pr, nil
 }
 
 func getExitCode(state *os.ProcessState, err error) int {
@@ -181,8 +202,31 @@ func (p *Process) Resume() error {
 	return nil
 }
 
+// Try to gracefully shut down the process before killing
+func (p *Process) Shutdown(timeout time.Duration) error {
+	pr := p.result.Load()
+	if pr != nil {
+		return nil
+	}
+	// try to exit gracefully
+	if err := generateConsoleCtrlEvent(syscall.CTRL_BREAK_EVENT, p.Pid()); err != nil {
+		// ctrl+break not sent, kill now
+		LogError(p.osProcess.Kill(), "win32: could not kill process")
+	}
+	select {
+	case <-p.doneCh:
+		return nil
+	case <-time.After(timeout):
+		return p.Kill()
+	}
+}
+
 // Kill the running process
 func (p *Process) Kill() error {
+	pr := p.result.Load()
+	if pr != nil {
+		return nil
+	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.osProcess.Kill()
@@ -224,5 +268,6 @@ func StartProcess(command *exec.Cmd, opts ...func(cmd *exec.Cmd, proc *Process))
 		return nil, err
 	}
 	proc.osProcess = command.Process
+	proc.doneCh = make(chan struct{})
 	return &proc, nil
 }
