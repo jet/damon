@@ -17,7 +17,10 @@ Param(
     [switch]$Build,
 
     [Parameter(ParameterSetName = 'Build')]
-    [string]$OutFile = "damon.exe"
+    [string]$OutFile = "damon.exe",
+
+    [Parameter(ParameterSetName = 'Build')]
+    [string]$PluginOutFile = "damon-plugin.exe"
 )
 
 if ($env:CONTAINER -eq "Y" -and $env:DOCKER -ne "no" ) {
@@ -84,6 +87,7 @@ if ($Build) {
     
     Write-Host $gcflags
     go.exe build -o $OutFile -ldflags="$ldflags" ./cmd/standalone
+    go.exe build -o $PluginOutFile -ldflags="$ldflags" ./cmd/plugin
     exit $LASTEXITCODE
 }
 
