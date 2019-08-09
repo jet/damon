@@ -30,20 +30,26 @@ type Metrics struct {
 	cpuNotification  prometheus.Counter
 
 	// memory
-	memoryWorkingSet     prometheus.Gauge
-	memoryCommitCharge   prometheus.Gauge
-	memoryPageFaultCount prometheus.Gauge
-	memoryNotification   prometheus.Counter
+	memoryWorkingSet            prometheus.Gauge
+	memoryCommitCharge          prometheus.Gauge
+	memoryPageFaultCount        prometheus.Gauge
+	memoryPeakWorkingSet        prometheus.Gauge
+	memoryPeakPagefileUsage     prometheus.Gauge
+	memoryPeakPagedPoolUsage    prometheus.Gauge
+	memoryPagedPoolUsage        prometheus.Gauge
+	memoryPeakNonPagedPoolUsage prometheus.Gauge
+	memoryNonPagedPoolUsage     prometheus.Gauge
+	memoryNotification          prometheus.Counter
 
 	// io
-	ioTxTotalBytes     prometheus.Gauge
+	ioTxTotalBytes    prometheus.Gauge
 	ioTxReadBytes     prometheus.Gauge
 	ioTxWriteBytes    prometheus.Gauge
 	ioTxOtherBytes    prometheus.Gauge
-	ioReadOpsTotal  prometheus.Gauge
-	ioWriteOpsTotal prometheus.Gauge
-	ioOtherOpsTotal prometheus.Gauge
-	ioTotalOperations    prometheus.Gauge
+	ioReadOpsTotal    prometheus.Gauge
+	ioWriteOpsTotal   prometheus.Gauge
+	ioOtherOpsTotal   prometheus.Gauge
+	ioTotalOperations prometheus.Gauge
 	ioNotification    prometheus.Counter
 }
 
@@ -126,6 +132,54 @@ func (m *Metrics) Init() {
 		ConstLabels: prometheus.Labels(m.Labels),
 	})
 	m.registry.MustRegister(m.memoryCommitCharge)
+	m.memoryPeakPagefileUsage = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "memory",
+		Name:        "peak_pagefile_usage_bytes",
+		Help:        `The peak value in bytes of the Commit Charge during the lifetime of this process.`,
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.memoryPeakPagefileUsage)
+	m.memoryPeakWorkingSet = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "memory",
+		Name:        "peak_working_set_bytes",
+		Help:        `The peak working set size, in bytes`,
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.memoryPeakWorkingSet)
+	m.memoryPeakPagedPoolUsage = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "memory",
+		Name:        "quota_peak_paged_pool_usage",
+		Help:        `The peak paged pool usage, in bytes.`,
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.memoryPeakPagedPoolUsage)
+	m.memoryPagedPoolUsage = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "memory",
+		Name:        "quota_nonpaged_pool_usage",
+		Help:        `The current nonpaged pool usage, in bytes.`,
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.memoryPagedPoolUsage)
+	m.memoryPeakNonPagedPoolUsage = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "memory",
+		Name:        "quota_peak_nonpaged_pool_usage",
+		Help:        `The peak nonpaged pool usage, in bytes.`,
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.memoryPeakNonPagedPoolUsage)
+	m.memoryNonPagedPoolUsage = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "memory",
+		Name:        "quota_paged_pool_usage",
+		Help:        `The current paged pool usage, in bytes.`,
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.memoryNonPagedPoolUsage)
 	m.memoryPageFaultCount = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace:   m.Namespace,
 		Subsystem:   "memory",
@@ -237,6 +291,12 @@ func (m *Metrics) OnStats(stats container.ProcessStats) {
 	m.memoryCommitCharge.Set(float64(stats.MemoryStats.PrivateUsageBytes))
 	m.memoryWorkingSet.Set(float64(stats.MemoryStats.WorkingSetSizeBytes))
 	m.memoryPageFaultCount.Set(float64(stats.MemoryStats.PageFaultCount))
+	m.memoryPeakPagefileUsage.Set(float64(stats.MemoryStats.PeakPagefileUsageBytes))
+	m.memoryPeakWorkingSet.Set(float64(stats.MemoryStats.PeakWorkingSetSizeBytes))
+	m.memoryPeakNonPagedPoolUsage.Set(float64(stats.MemoryStats.PeakNonPagedPoolUsageBytes))
+	m.memoryNonPagedPoolUsage.Set(float64(stats.MemoryStats.NonPagedPoolUsageBytes))
+	m.memoryPeakPagedPoolUsage.Set(float64(stats.MemoryStats.PeakPagedPoolUsageBytes))
+	m.memoryPagedPoolUsage.Set(float64(stats.MemoryStats.PagedPoolUsageBytes))
 	// io
 	m.ioTxReadBytes.Set(float64(stats.IOStats.TotalTxReadBytes))
 	m.ioTxWriteBytes.Set(float64(stats.IOStats.TotalTxWrittenBytes))
