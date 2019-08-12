@@ -7,43 +7,33 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
-
-	"github.com/pkg/errors"
 )
 
 const DefaultExitTimeout = time.Second * 30
 
-// ErrProcessNotStarted is returned when an operation is performed
-// on a process before it has been started.
-var ErrProcessNotStarted = errors.New("process not started")
-
 const (
-	ExitStatusStartError = 253
-	ExitStatusError      = 254
-	ExitStatusUnknown    = 255
+	ExitStatusStartErr = 253
+	ExitStatusError    = 254
+	ExitStatusUnknown  = 255
 )
 
 // Process wraps exec.Cmd to provide some helper functions
 type Process struct {
-	Cmd         *exec.Cmd
-	ExitTimeout time.Duration
-	Token       *Token
-	mu          sync.RWMutex
-	suspended   bool
-	started     bool
-	ended       bool
-	startTime   time.Time
-	endTime     time.Time
+	osProcess *os.Process
+	mu        sync.RWMutex
+	suspended bool
+	doneCh    chan struct{}
+	exitCh    chan time.Duration
+	waitLock  sync.Mutex
+	result    *ProcessResult
 }
 
 // ProcessResult is the result of the process after it completed
 type ProcessResult struct {
 	Err        error
 	ExitStatus int
-	StartTime  time.Time
 	EndTime    time.Time
 }
 
@@ -60,49 +50,26 @@ type ProcessMemoryInfo struct {
 	PrivateUsage               uint64
 }
 
-// Start running the process command
-// Use Wait to block until the process completes
-func (p *Process) Start() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.start()
-}
-
-// RunningDuration returns the duration that the process has been running
-func (p *Process) RunningDuration() time.Duration {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if p.ended {
-		return p.endTime.Sub(p.startTime)
-	}
-	return time.Since(p.startTime)
-}
-
-// StartTime returns the start time of the process
-func (p *Process) StartTime() time.Time {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.startTime
-}
-
 type AffinityMask uint32
 
 // AffinityMask returns the process affinity mask and system affinity mask
 func (p *Process) AffinityMask() (AffinityMask, AffinityMask, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	if p.started {
-		phProc, err := openProcess(_PROCESS_QUERY_INFORMATION, false, p.Pid())
-		if err != nil {
-			return 0, 0, nil
-		}
-		defer CloseHandleLogErr(*phProc, "win32: failed to close process handle")
-		pam, sam, err := getProcessAffinityMask(*phProc)
-		return AffinityMask(pam), AffinityMask(sam), err
+	phProc, err := openProcess(_PROCESS_QUERY_INFORMATION, false, p.Pid())
+	if err != nil {
+		return 0, 0, nil
 	}
-	return 0, 0, ErrProcessNotStarted
+	defer CloseHandleLogErr(*phProc, "win32: failed to close process handle")
+	pam, sam, err := getProcessAffinityMask(*phProc)
+	return AffinityMask(pam), AffinityMask(sam), err
 }
 
+// MemoryInfo gets the process memory performance counters
+//
+// Currently this uses psapi's GetProcessMemoryInfo.
+// There is probably a different way to get more granular memory metrics,
+// but we're avoiding WMI because in practice it had a tendency of blocking and crashing if the queries per second is too great
 func (p *Process) MemoryInfo() (ProcessMemoryInfo, error) {
 	phProc, err := openProcess(_PROCESS_QUERY_INFORMATION|_PROCESS_VM_READ, false, p.Pid())
 	if err != nil {
@@ -127,113 +94,61 @@ func (p *Process) MemoryInfo() (ProcessMemoryInfo, error) {
 	}, nil
 }
 
-// StartSuspended starts the process with the main thread suspended
-// which is useful for creating a process that should be assigned
-// to a JobObject before running
-// Use Process.Resume to resume the suspended process.
-func (p *Process) StartSuspended() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.suspended = true
-	p.Cmd.SysProcAttr.CreationFlags |= _CREATE_SUSPENDED
-	return p.start()
-}
-
-func (p *Process) start() error {
-	if err := p.Cmd.Start(); err != nil {
-		return err
-	}
-	p.startTime = time.Now()
-	p.started = true
-	return nil
-}
-
 // Wait until the process exits and return the results.
-// exitCh is used to signal the process to exit early
-// returns an error if the process was not started
-func (p *Process) Wait(exitCh <-chan struct{}) (*ProcessResult, error) {
-	p.mu.RLock()
-	if !p.started {
-		p.mu.RUnlock()
-		return nil, ErrProcessNotStarted
+func (p *Process) Wait() (*ProcessResult, error) {
+	p.waitLock.Lock()
+	if p.doneCh != nil {
+		p.waitLock.Unlock()
+		<-p.doneCh
+		return p.result, nil
 	}
-	p.mu.RUnlock()
-	var werr atomic.Value
-	doneCh := make(chan struct{})
-	if p.Cmd.Process == nil {
-		return nil, fmt.Errorf("Process.Wait: process not found. Is it started?")
-	}
-	if exitCh == nil {
-		exitCh = make(chan struct{}) // never exit
-	}
+	p.doneCh = make(chan struct{})
+	p.exitCh = make(chan time.Duration, 1)
+	p.waitLock.Unlock()
 	go func() {
+		var timeout time.Duration
 		select {
-		case <-exitCh:
-			Logf("win32: command termination requested")
+		case timeout = <-p.exitCh:
+			Logf("win32: command termination requested: %v", p)
 			// received a request to exit the process
-		case <-doneCh:
-			Logf("win32: command completed")
+		case <-p.doneCh:
+			Logf("win32: command completed: %v", p)
 			// done before exit signal received
 			return
 		}
 		// try to exit gracefully
 		if err := generateConsoleCtrlEvent(syscall.CTRL_BREAK_EVENT, p.Pid()); err != nil {
 			// ctrl+break not sent, kill now
-			LogError(p.Cmd.Process.Kill(), "win32: could not kill process")
+			LogError(p.osProcess.Kill(), "win32: could not kill process")
 			return
 		}
 		select {
-		case <-doneCh:
+		case <-p.doneCh:
 			Logf("win32: command completed")
 			return
-		case <-time.After(p.ExitTimeout):
+		case <-time.After(timeout):
 			// give up -- send kill signal
-			LogError(p.Cmd.Process.Kill(), "win32: could not kill process")
+			LogError(p.osProcess.Kill(), "win32: could not kill process")
 		}
 	}()
-	go func() {
-		defer close(doneCh)
-		Logf("win32: Cmd.Wait")
-		err := p.Cmd.Wait()
-		Logf("win32: Cmd.Wait complete")
-		LogError(err, "win32: Cmd.Wait error")
-		p.mu.Lock()
-		p.ended = true
-		p.endTime = time.Now()
-		if err != nil {
-			werr.Store(err)
-		}
-		p.mu.Unlock()
-	}()
-	<-doneCh
-	Logf("win32: process completed")
-	res := &ProcessResult{
-		StartTime: p.startTime,
-		EndTime:   p.endTime,
+	defer close(p.doneCh)
+	defer Logf("win32: process completed")
+	Logf("win32: Cmd.Wait")
+	state, err := p.osProcess.Wait()
+	Logf("win32: Cmd.Wait complete")
+	LogError(err, "win32: Cmd.Wait error")
+	p.result = &ProcessResult{
+		Err:        err,
+		ExitStatus: getExitCode(state, err),
 	}
-	if e, ok := werr.Load().(error); ok {
-		res.Err = e
-	}
-	res.ExitStatus = getExitCode(p.Cmd.ProcessState, res.Err)
-	return res, nil
+	return p.result, nil
 }
 
 func getExitCode(state *os.ProcessState, err error) int {
-	if state == nil {
-		return ExitStatusUnknown
-	}
-	if !state.Exited() {
-		return ExitStatusUnknown
-	}
-	if state.Success() {
-		return 0
+	if state != nil && state.Exited() {
+		return state.ExitCode()
 	}
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			if ws, ok := ee.Sys().(syscall.WaitStatus); ok {
-				return ws.ExitStatus()
-			}
-		}
 		return ExitStatusError
 	}
 	return ExitStatusUnknown
@@ -241,13 +156,13 @@ func getExitCode(state *os.ProcessState, err error) int {
 
 // Pid returns the process ID
 func (p *Process) Pid() uint32 {
-	if proc := p.Cmd.Process; proc != nil {
+	if proc := p.osProcess; proc != nil {
 		return uint32(proc.Pid)
 	}
 	return 0
 }
 
-// Resume will resume the process created with suspend=true
+// Resume will resume the process created with Suspend
 func (p *Process) Resume() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -265,30 +180,71 @@ func (p *Process) Resume() error {
 	return nil
 }
 
+// Shutdown sends a shutdown signal to the process.
+func (p *Process) Shutdown(timeout time.Duration) error {
+	select {
+	case p.exitCh <- timeout:
+		// exit signal accepted
+	default:
+		// exit channel may be full (already asked to exit)
+		// So lets just wait
+	}
+	select {
+	case <-p.doneCh:
+		// process completed
+		return nil
+	case <-time.After(timeout):
+		// Lets kill it
+		return p.Kill()
+	}
+}
+
+func (p *Process) String() string {
+	return fmt.Sprintf("pid=%d", p.osProcess.Pid)
+}
+
 // Kill the running process
 func (p *Process) Kill() error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.Cmd.Process.Kill()
+	return p.osProcess.Kill()
 }
 
-// CreateProcessWithToken creates a process with the given access token
-// which is used to limit the access rights of the command
-func CreateProcessWithToken(command *exec.Cmd, token *Token) (*Process, error) {
-	cmd := &Process{
-		Cmd:         command,
-		ExitTimeout: DefaultExitTimeout,
+func AccessToken(token *Token) func(*exec.Cmd, *Process) {
+	return func(command *exec.Cmd, proc *Process) {
+		if command.SysProcAttr == nil {
+			command.SysProcAttr = &syscall.SysProcAttr{
+				CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+			}
+		} else {
+			command.SysProcAttr.CreationFlags |= syscall.CREATE_NEW_PROCESS_GROUP
+		}
+		if token != nil {
+			command.SysProcAttr.Token = token.hToken
+		}
 	}
+}
+
+func Suspended(command *exec.Cmd, proc *Process) {
 	if command.SysProcAttr == nil {
 		command.SysProcAttr = &syscall.SysProcAttr{
-			CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+			CreationFlags: _CREATE_SUSPENDED,
 		}
 	} else {
-		command.SysProcAttr.CreationFlags |= syscall.CREATE_NEW_PROCESS_GROUP
+		command.SysProcAttr.CreationFlags |= _CREATE_SUSPENDED
 	}
-	if token != nil {
-		command.SysProcAttr.Token = token.hToken
-		cmd.Token = token
+	proc.suspended = true
+}
+
+// Sets up a command with additional options
+func StartProcess(command *exec.Cmd, opts ...func(cmd *exec.Cmd, proc *Process)) (*Process, error) {
+	var proc Process
+	for _, opt := range opts {
+		opt(command, &proc)
 	}
-	return cmd, nil
+	if err := command.Start(); err != nil {
+		return nil, err
+	}
+	proc.osProcess = command.Process
+	return &proc, nil
 }

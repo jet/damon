@@ -4,7 +4,6 @@ package win32
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -42,10 +41,7 @@ func RunTestStrings(t *testing.T, fn StringTestFunc) {
 			// not valid unicode this line
 			continue
 		}
-		t.Run(fmt.Sprintf("testdata/strings.txt:%d", lineno), func(t *testing.T) {
-			t.Helper()
-			fn(t, line)
-		})
+		fn(t, line)
 	}
 }
 

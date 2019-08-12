@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"time"
 
 	"github.com/jet/damon/container"
 	"github.com/jet/damon/log"
@@ -55,6 +57,7 @@ func main() {
 	if err != nil {
 		logger.Error(err, "unable to load container configuration from environment variables")
 	}
+	ccfg.Logger = clogger
 	win32.SetLogger(logger)
 	resources := win32.GetSystemResources()
 	labels := make(map[string]string)
@@ -68,27 +71,16 @@ func main() {
 		Labels:     labels,
 	}
 	m.Init()
-	c := container.Container{
-		Command: cmd,
-		Config:  ccfg,
-		Logger:  clogger,
-		OnStats: func(s container.ProcessStats) {
-			m.OnStats(s)
-		},
-		OnViolation: func(v container.LimitViolation) {
-			m.OnViolation(v)
-		},
-	}
-	if err := c.Start(); err != nil {
+	c, err := container.RunContained(cmd, &ccfg)
+	if err != nil {
 		logger.Error(err, "damon startup error")
 		os.Exit(1)
 	}
-	exitCh := make(chan struct{})
 	sigCh := make(chan os.Signal)
 	signal.Notify(sigCh)
 	go func() {
 		<-sigCh
-		close(exitCh)
+		c.Shutdown(30 * time.Second)
 	}()
 	if addr := ListenAddress(); addr != "" {
 		go func() {
@@ -103,23 +95,23 @@ func main() {
 			logger.Error(srv.ListenAndServe(), "error closing http server")
 		}()
 	}
-	pr, err := c.Wait(exitCh)
-	if err != nil {
+	pr, _ := c.WaitForResult(context.Background())
+	end := time.Now()
+	if pr.Err != nil {
 		logger.WithFields(map[string]interface{}{
 			"version":  vinfo,
 			"revision": version.GitCommit,
 			"cmdline":  os.Args,
 		}).Error(err, "process exited with an error")
 	}
-
 	logger.WithFields(map[string]interface{}{
 		"version":     vinfo,
 		"revision":    version.GitCommit,
 		"cmdline":     os.Args,
-		"start":       pr.Start,
-		"end":         pr.End,
-		"run_time":    pr.End.Sub(pr.Start),
-		"exit_status": pr.ExitCode,
+		"start":       c.StartTime,
+		"end":         end,
+		"run_time":    end.Sub(c.StartTime),
+		"exit_status": pr.ExitStatus,
 	}).Logln("damon exiting")
-	os.Exit(pr.ExitCode)
+	os.Exit(pr.ExitStatus)
 }

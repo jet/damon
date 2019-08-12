@@ -1,9 +1,8 @@
 package container
 
 import (
+	"context"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
 	"runtime"
 	"time"
@@ -13,6 +12,8 @@ import (
 )
 
 type Config struct {
+	// Name of the container
+	Name string
 	// EnforceCPU if set to true will enable kernel max-cpu rate enforcement
 	EnforceCPU bool
 	// EnforceMemory if set to true will enable memory quota
@@ -27,33 +28,26 @@ type Config struct {
 	// CPUHardCap enforces a hard cap on the CPU time this process can get
 	// If set to false, then it uses a weight
 	CPUHardCap bool
+	// Logger to be used for debug logs
+	Logger Logger
 }
 
 const MBToBytes uint64 = 1024 * 1024
 const MinimumCPUMHz = 100
 
-type Logger interface {
-	Logln(v ...interface{})
-	Error(err error, msg string)
-}
-
 type Container struct {
-	Name string
-	Config
-	Logger      Logger
-	Command     *exec.Cmd
-	OnStats     OnStatsFn
-	OnViolation OnViolationFn
-	exitCh      <-chan struct{}
-	doneCh      <-chan struct{}
-	job         *win32.JobObject
-	proc        *win32.Process
+	Name      string
+	StartTime time.Time
+	Logger    Logger
+	doneCh    chan struct{}
+	job       *win32.JobObject
+	proc      *win32.Process
+	result    Result
 }
 
 type Result struct {
-	Start    time.Time
-	End      time.Time
-	ExitCode int
+	Err        error
+	ExitStatus int
 }
 
 type LimitViolation struct {
@@ -106,18 +100,24 @@ type IOStats struct {
 type OnStatsFn func(s ProcessStats)
 type OnViolationFn func(v LimitViolation)
 
-func (c *Container) Start() error {
-	job, err := win32.CreateJobObject(c.Name)
+func RunContained(cmd *exec.Cmd, cfg *Config) (*Container, error) {
+	var container Container
+	job, err := win32.CreateJobObject(cfg.Name)
 	if err != nil {
-		return errors.Wrapf(err, "unable to get create win32.JobObject")
+		return nil, errors.Wrapf(err, "unable to get create win32.JobObject")
 	}
-	c.job = job
+	container.Name = cfg.Name
+	container.job = job
 	token, err := win32.CurrentProcessToken()
 	if err != nil {
-		return errors.Wrapf(err, "unable to get current process token")
+		return nil, errors.Wrapf(err, "unable to get current process token")
 	}
-	if c.Config.RestrictedToken {
-		c.Logger.Logln("creating restricted token")
+	logger := logWrapper{
+		Logger: cfg.Logger,
+	}
+	container.Logger = logger
+	if cfg.RestrictedToken {
+		cfg.Logger.Logln("creating restricted token")
 		rt, err := token.CreateRestrictedToken(win32.TokenRestrictions{
 			DisableMaxPrivilege: true,
 			LUAToken:            true,
@@ -125,44 +125,37 @@ func (c *Container) Start() error {
 				"BUILTIN\\Administrator",
 			},
 		})
-		c.closeLogError(token, "couldn't closed process token")
+		logger.CloseLogError(token, "couldn't closed process token")
 		if err != nil {
-			return errors.Wrapf(err, "unable to create restricted token")
+			return nil, errors.Wrapf(err, "unable to create restricted token")
 		}
 		token = rt
 	}
-	defer c.closeLogError(token, "couldn't closed process token")
+	defer logger.CloseLogError(token, "couldn't closed process token")
 
-	// Link up standard in/out
-	c.Command.Stderr = os.Stderr
-	c.Command.Stdout = os.Stdout
-	c.Command.Stdin = os.Stdin
-
-	proc, err := win32.CreateProcessWithToken(c.Command, token)
+	proc, err := win32.StartProcess(cmd, win32.AccessToken(token), win32.Suspended)
 	if err != nil {
-		return errors.Wrapf(err, "unable to get create process")
-	}
-	c.proc = proc
-	if err = c.proc.StartSuspended(); err != nil {
-		return err
+		return nil, errors.Wrapf(err, "unable to start process")
 	}
 	if err = job.Assign(proc); err != nil {
-		c.Logger.Error(proc.Kill(), "unable to kill child process")
-		return err
+		logger.Error(proc.Kill(), "unable to kill child process")
+		return nil, err
 	}
+	container.proc = proc
 	eli := &win32.ExtendedLimitInformation{
 		KillOnJobClose: true,
 	}
-	if c.Config.EnforceMemory {
-		eli.JobMemoryLimit = MBToBytes * uint64(c.Config.MemoryMBLimit)
+	if cfg.EnforceMemory {
+		eli.JobMemoryLimit = MBToBytes * uint64(cfg.MemoryMBLimit)
 	}
-	if err = c.killOnError(job.SetInformation(eli)); err != nil {
-		c.closeLogError(job, "failed to close JobObject")
-		return errors.Wrapf(err, "container: Could not set basic limit information")
+
+	if err = container.killOnError(job.SetInformation(eli)); err != nil {
+		logger.CloseLogError(job, "failed to close JobObject")
+		return nil, errors.Wrapf(err, "container: Could not set basic limit information")
 	}
-	if c.Config.EnforceCPU {
-		if c.Config.CPUMHzLimit < MinimumCPUMHz {
-			return errors.Errorf("CPUMHzLimit is too low. Minimum is %d", MinimumCPUMHz)
+	if cfg.EnforceCPU {
+		if cfg.CPUMHzLimit < MinimumCPUMHz {
+			return nil, errors.Errorf("CPUMHzLimit is too low. Minimum is %d", MinimumCPUMHz)
 		}
 		nli := &win32.NotificationLimitInformation{
 			CPURateLimit: &win32.NotificationRateLimitTolerance{
@@ -173,37 +166,31 @@ func (c *Container) Start() error {
 		crci := &win32.CPURateControlInformation{
 			Rate: &win32.CPUMaxRateInformation{
 				HardCap: true,
-				Rate:    win32.MHzToCPURate(uint64(c.Config.CPUMHzLimit)),
+				Rate:    win32.MHzToCPURate(uint64(cfg.CPUMHzLimit)),
 			},
 			Notify: true,
 		}
-		if err = c.killOnError(job.SetInformation(nli)); err != nil {
-			c.closeLogError(job, "failed to close JobObject")
-			return errors.Wrapf(err, "container: Could not set cpu notification limits")
+		if err = container.killOnError(job.SetInformation(nli)); err != nil {
+			logger.CloseLogError(job, "failed to close JobObject")
+			return nil, errors.Wrapf(err, "container: Could not set cpu notification limits")
 		}
-		if err = c.killOnError(job.SetInformation(crci)); err != nil {
-			c.closeLogError(job, "failed to close JobObject")
-			return errors.Wrapf(err, "container: Could not set cpu rate limits")
+		if err = container.killOnError(job.SetInformation(crci)); err != nil {
+			logger.CloseLogError(job, "failed to close JobObject")
+			return nil, errors.Wrapf(err, "container: Could not set cpu rate limits")
 		}
 	}
-	if err = c.killOnError(proc.Resume()); err != nil {
-		c.closeLogError(job, "failed to close JobObject")
-		return errors.Wrapf(err, "container: Could not resume process main thread")
+	if err = container.killOnError(proc.Resume()); err != nil {
+		logger.CloseLogError(job, "failed to close JobObject")
+		return nil, errors.Wrapf(err, "container: Could not resume process main thread")
 	}
-	c.exitCh = make(chan struct{})
-	c.doneCh = make(chan struct{})
-	if c.OnStats != nil {
-		go c.pollStats()
-	}
-	go c.pollNotifications()
-	return nil
+	container.doneCh = make(chan struct{})
+	go (&container).wait()
+	return &container, nil
 }
 
-func (c *Container) pollNotifications() {
+func (c *Container) PollViolations(fn func(v LimitViolation)) {
 	for {
 		select {
-		case <-c.exitCh:
-			return
 		case <-c.doneCh:
 			return
 		default:
@@ -244,20 +231,16 @@ func (c *Container) pollNotifications() {
 					})
 				}
 			}
-			if c.OnViolation != nil {
-				for _, v := range violations {
-					c.OnViolation(v)
-				}
+			for _, v := range violations {
+				fn(v)
 			}
 		}
 	}
 }
 
-func (c *Container) pollStats() {
+func (c *Container) PollStats(fn func(stats ProcessStats)) {
 	for {
 		select {
-		case <-c.exitCh:
-			return
 		case <-c.doneCh:
 			return
 		case <-time.After(10 * time.Second):
@@ -271,7 +254,7 @@ func (c *Container) pollStats() {
 				c.Logger.Error(err, "container: get proc.MemoryInfo error")
 				continue
 			}
-			procTime := time.Since(c.proc.StartTime())
+			procTime := time.Since(c.StartTime)
 			stats := ProcessStats{
 				CPUStats: CPUStats{
 					TotalRunTime:    procTime,
@@ -301,24 +284,48 @@ func (c *Container) pollStats() {
 					TotalTxCountBytes:      info.IO.ReadTransferCount + info.IO.WriteTransferCount + info.IO.OtherTransferCount,
 				},
 			}
-			if c.OnStats != nil {
-				c.OnStats(stats)
-			}
+			fn(stats)
 		}
 	}
 }
 
-func (c *Container) Wait(exitCh <-chan struct{}) (Result, error) {
-	pr, err := c.proc.Wait(exitCh)
-	c.Logger.Logln(fmt.Sprintf("process exited: %d", pr.ExitStatus))
+func (c *Container) wait() {
+	defer close(c.doneCh)
+	pr, err := c.proc.Wait()
 	if err != nil {
-		return Result{}, err
+		c.result = Result{
+			Err: err,
+		}
+		c.Logger.Logln(fmt.Sprintf("process error: %v", err))
+		return
 	}
-	return Result{
-		Start:    pr.StartTime,
-		End:      pr.EndTime,
-		ExitCode: pr.ExitStatus,
-	}, pr.Err
+	c.Logger.Logln(fmt.Sprintf("process exited: %d", pr.ExitStatus))
+	c.result = Result{
+		ExitStatus: pr.ExitStatus,
+	}
+}
+
+func (c *Container) WaitForResult(ctx context.Context) (Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-c.doneCh:
+		return c.result, nil
+	case <-ctx.Done():
+		return Result{
+			ExitStatus: -1,
+		}, ctx.Err()
+	}
+}
+
+func (c *Container) Shutdown(timeout time.Duration) error {
+	c.Logger.Logln("shutdown triggered")
+	return c.proc.Shutdown(timeout)
+}
+
+func (c *Container) Done() <-chan struct{} {
+	return c.doneCh
 }
 
 func (c *Container) killOnError(err error) error {
@@ -326,10 +333,4 @@ func (c *Container) killOnError(err error) error {
 		c.Logger.Error(c.proc.Kill(), "unable to kill child process")
 	}
 	return err
-}
-
-func (c *Container) closeLogError(o io.Closer, msg string) {
-	if err := o.Close(); err != nil {
-		c.Logger.Error(err, msg)
-	}
 }

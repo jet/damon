@@ -18,6 +18,7 @@ const DefaultLogMaxFiles = 5
 const DefaultMetricsEndpoint = "/metrics"
 
 const (
+	EnvDamonContainerName  = "DAMON_CONTAINER_NAME"
 	EnvDamonLogMaxSizeMB   = "DAMON_LOG_MAX_SIZE"
 	EnvDamonLogMaxFiles    = "DAMON_LOG_MAX_FILES"
 	EnvDamonLogDir         = "DAMON_LOG_DIR"
@@ -105,6 +106,15 @@ func envToBool(env string, def bool) bool {
 	return def
 }
 
+func envStr(def string, envs ...string) string {
+	for _, e := range envs {
+		if env := os.Getenv(e); env != "" {
+			return env
+		}
+	}
+	return def
+}
+
 func envToInt(def int64, envs ...string) (int64, error) {
 	for _, e := range envs {
 		if env := os.Getenv(e); env != "" {
@@ -135,8 +145,18 @@ func MetricsEndpoint() string {
 	return DefaultMetricsEndpoint
 }
 
+func nomadContainerName() string {
+	if alloc, name := os.Getenv(EnvNomadAllocID), os.Getenv(EnvNomadTaskName); alloc != "" && name != "" {
+		return fmt.Sprintf("damon:%s.%s", alloc, name)
+	}
+	return ""
+}
+
 func LoadContainerConfigFromEnvironment() (container.Config, error) {
 	var cfg container.Config
+	if env := os.Getenv(EnvDamonContainerName); env != "" {
+		cfg.Name = envStr("", EnvDamonContainerName, nomadContainerName())
+	}
 	cpu, err := envToInt(0, EnvDamonCPULimit, EnvNomadCPULimit)
 	if err != nil {
 		return cfg, err
