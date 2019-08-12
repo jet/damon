@@ -3,6 +3,7 @@ package container
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"time"
@@ -38,8 +39,10 @@ const MinimumCPUMHz = 100
 type Container struct {
 	Name      string
 	StartTime time.Time
+	PID       int
 	Logger    Logger
 	doneCh    chan struct{}
+	token     *win32.Token
 	job       *win32.JobObject
 	proc      *win32.Process
 	result    Result
@@ -117,7 +120,7 @@ func RunContained(cmd *exec.Cmd, cfg *Config) (*Container, error) {
 	}
 	container.Logger = logger
 	if cfg.RestrictedToken {
-		cfg.Logger.Logln("creating restricted token")
+		logger.Logln("creating restricted token")
 		rt, err := token.CreateRestrictedToken(win32.TokenRestrictions{
 			DisableMaxPrivilege: true,
 			LUAToken:            true,
@@ -132,7 +135,7 @@ func RunContained(cmd *exec.Cmd, cfg *Config) (*Container, error) {
 		token = rt
 	}
 	defer logger.CloseLogError(token, "couldn't closed process token")
-
+	container.token = token
 	proc, err := win32.StartProcess(cmd, win32.AccessToken(token), win32.Suspended)
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to start process")
@@ -142,6 +145,7 @@ func RunContained(cmd *exec.Cmd, cfg *Config) (*Container, error) {
 		return nil, err
 	}
 	container.proc = proc
+	container.PID = int(container.proc.Pid())
 	eli := &win32.ExtendedLimitInformation{
 		KillOnJobClose: true,
 	}
@@ -183,6 +187,7 @@ func RunContained(cmd *exec.Cmd, cfg *Config) (*Container, error) {
 		logger.CloseLogError(job, "failed to close JobObject")
 		return nil, errors.Wrapf(err, "container: Could not resume process main thread")
 	}
+	container.StartTime = time.Now()
 	container.doneCh = make(chan struct{})
 	go (&container).wait()
 	return &container, nil
@@ -326,6 +331,42 @@ func (c *Container) Shutdown(timeout time.Duration) error {
 
 func (c *Container) Done() <-chan struct{} {
 	return c.doneCh
+}
+
+func (c *Container) Signal(sig os.Signal) error {
+	return c.proc.Signal(sig)
+}
+
+// Task is a program run in the context of a Container's job object
+// that is not the main program
+
+func (c *Container) Exec(cfg TaskConfig) (*Task, error) {
+	if len(cfg.Command) == 0 {
+		return nil, fmt.Errorf("exec requires at least 1 argument")
+	}
+	name := cfg.Command[0]
+	var args []string
+	if len(cfg.Command) > 1 {
+		args = cfg.Command[1:]
+	}
+	ec := exec.Command(name, args...)
+	ec.Env = cfg.EnvList
+	ec.Stderr = cfg.Stderr
+	ec.Stdout = cfg.Stdout
+	ec.Dir = cfg.Dir
+	proc, err := win32.StartProcess(ec, win32.AccessToken(c.token), win32.Suspended)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.job.Assign(proc); err != nil {
+		c.Logger.Error(proc.Kill(), "unable to kill exec process")
+		return nil, err
+	}
+	if err := proc.Resume(); err != nil {
+		c.Logger.Error(proc.Kill(), "unable to kill exec process")
+		return nil, err
+	}
+	return &Task{osProcess: proc}, nil
 }
 
 func (c *Container) killOnError(err error) error {

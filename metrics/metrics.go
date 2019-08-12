@@ -444,7 +444,7 @@ func (c *CPUCollector) Sample(m CPUMeasurement) CPUSample {
 	c.lock.Unlock()
 
 	// total cpu time = total time * num cores
-	ttime := (m.TotalTime - t0) * time.Duration(c.Cores)
+	ttime := (m.TotalTime - t0)
 	tmhz := c.MHzPerCore * float64(c.Cores)
 
 	kperc := float64(m.KernelTime-k0) / float64(ttime)

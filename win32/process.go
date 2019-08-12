@@ -210,6 +210,12 @@ func (p *Process) Kill() error {
 	return p.osProcess.Kill()
 }
 
+func (p *Process) Signal(sig os.Signal) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.osProcess.Signal(sig)
+}
+
 func AccessToken(token *Token) func(*exec.Cmd, *Process) {
 	return func(command *exec.Cmd, proc *Process) {
 		if command.SysProcAttr == nil {
@@ -247,4 +253,20 @@ func StartProcess(command *exec.Cmd, opts ...func(cmd *exec.Cmd, proc *Process))
 	}
 	proc.osProcess = command.Process
 	return &proc, nil
+}
+
+// FindProcess finds the process running as the given PID
+func FindProcess(pid int) (*Process, error) {
+	var proc Process
+	var err error
+	proc.osProcess, err = os.FindProcess(pid)
+	if err != nil {
+		return nil, err
+	}
+	return &proc, nil
+}
+
+// CurrentProcess returns the currently executing process
+func CurrentProcess() (*Process, error) {
+	return FindProcess(os.Getpid())
 }

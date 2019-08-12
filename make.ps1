@@ -16,8 +16,11 @@ Param(
     [Parameter(ParameterSetName='Build')]
     [switch]$Build,
 
-    [Parameter(ParameterSetName='Build')]
-    [string]$OutFile = "damon.exe"
+    [Parameter(ParameterSetName = 'Build')]
+    [string]$OutFile = "damon.exe",
+
+    [Parameter(ParameterSetName = 'Build')]
+    [string]$PluginOutFile = "damon-plugin.exe"
 )
 
 $GOLANG_LINT_VERSION="1.10.2"
@@ -78,6 +81,7 @@ if($Build) {
     
     Write-Host $gcflags
     go.exe build -o $OutFile -ldflags="$ldflags" ./cmd/standalone
+    go.exe build -o $PluginOutFile -ldflags="$ldflags" ./cmd/plugin
     exit $LASTEXITCODE
 }
 
