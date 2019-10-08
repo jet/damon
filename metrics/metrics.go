@@ -3,10 +3,11 @@ package metrics
 import (
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jet/damon/container"
-	"github.com/prometheus/client_golang/prometheus" 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -19,6 +20,8 @@ type Metrics struct {
 	cpuCollector *CPUCollector
 	registry     *prometheus.Registry
 	handler      http.Handler
+	perfLock     sync.Mutex
+	perfCounters atomic.Value
 
 	// cpu
 	cpuKernelTime    prometheus.Gauge
@@ -30,20 +33,26 @@ type Metrics struct {
 	cpuNotification  prometheus.Counter
 
 	// memory
-	memoryWorkingSet     prometheus.Gauge
-	memoryCommitCharge   prometheus.Gauge
-	memoryPageFaultCount prometheus.Gauge
-	memoryNotification   prometheus.Counter
+	memoryWorkingSet            prometheus.Gauge
+	memoryCommitCharge          prometheus.Gauge
+	memoryPageFaultCount        prometheus.Gauge
+	memoryPeakWorkingSet        prometheus.Gauge
+	memoryPeakPagefileUsage     prometheus.Gauge
+	memoryPeakPagedPoolUsage    prometheus.Gauge
+	memoryPagedPoolUsage        prometheus.Gauge
+	memoryPeakNonPagedPoolUsage prometheus.Gauge
+	memoryNonPagedPoolUsage     prometheus.Gauge
+	memoryNotification          prometheus.Counter
 
 	// io
-	ioTxTotalBytes     prometheus.Gauge
+	ioTxTotalBytes    prometheus.Gauge
 	ioTxReadBytes     prometheus.Gauge
 	ioTxWriteBytes    prometheus.Gauge
 	ioTxOtherBytes    prometheus.Gauge
-	ioReadOpsTotal  prometheus.Gauge
-	ioWriteOpsTotal prometheus.Gauge
-	ioOtherOpsTotal prometheus.Gauge
-	ioTotalOperations    prometheus.Gauge
+	ioReadOpsTotal    prometheus.Gauge
+	ioWriteOpsTotal   prometheus.Gauge
+	ioOtherOpsTotal   prometheus.Gauge
+	ioTotalOperations prometheus.Gauge
 	ioNotification    prometheus.Counter
 }
 
@@ -53,7 +62,7 @@ func (m *Metrics) Init() {
 		Cores:      m.Cores,
 	}
 	m.registry = prometheus.NewRegistry()
-	m.handler = promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{}) 
+	m.handler = promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
 	m.cpuKernelTime = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace:   m.Namespace,
 		Subsystem:   "cpu",
@@ -126,6 +135,54 @@ func (m *Metrics) Init() {
 		ConstLabels: prometheus.Labels(m.Labels),
 	})
 	m.registry.MustRegister(m.memoryCommitCharge)
+	m.memoryPeakPagefileUsage = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "memory",
+		Name:        "peak_pagefile_usage_bytes",
+		Help:        `The peak value in bytes of the Commit Charge during the lifetime of this process.`,
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.memoryPeakPagefileUsage)
+	m.memoryPeakWorkingSet = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "memory",
+		Name:        "peak_working_set_bytes",
+		Help:        `The peak working set size, in bytes`,
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.memoryPeakWorkingSet)
+	m.memoryPeakPagedPoolUsage = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "memory",
+		Name:        "quota_peak_paged_pool_usage",
+		Help:        `The peak paged pool usage, in bytes.`,
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.memoryPeakPagedPoolUsage)
+	m.memoryPagedPoolUsage = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "memory",
+		Name:        "quota_nonpaged_pool_usage",
+		Help:        `The current nonpaged pool usage, in bytes.`,
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.memoryPagedPoolUsage)
+	m.memoryPeakNonPagedPoolUsage = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "memory",
+		Name:        "quota_peak_nonpaged_pool_usage",
+		Help:        `The peak nonpaged pool usage, in bytes.`,
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.memoryPeakNonPagedPoolUsage)
+	m.memoryNonPagedPoolUsage = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "memory",
+		Name:        "quota_paged_pool_usage",
+		Help:        `The current paged pool usage, in bytes.`,
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.memoryNonPagedPoolUsage)
 	m.memoryPageFaultCount = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace:   m.Namespace,
 		Subsystem:   "memory",
@@ -218,9 +275,14 @@ func (m *Metrics) Init() {
 		ConstLabels: prometheus.Labels(m.Labels),
 	})
 	m.registry.MustRegister(m.ioNotification)
+	m.perfCounters.Store(PerfCounters{})
 }
 
 func (m *Metrics) OnStats(stats container.ProcessStats) {
+	m.perfLock.Lock()
+	defer m.perfLock.Unlock()
+	counters := m.PerfCounters()
+	counters.TimeStamp = time.Now()
 	sample := m.cpuCollector.Sample(CPUMeasurement{
 		TotalTime:  stats.CPUStats.TotalCPUTime,
 		UserTime:   stats.CPUStats.TotalUserTime,
@@ -233,10 +295,36 @@ func (m *Metrics) OnStats(stats container.ProcessStats) {
 	m.cpuKernelPercent.Set(sample.KernelPercent)
 	m.cpuUserHz.Set(float64(sample.UserHz))
 	m.cpuUserPercent.Set(sample.UserPercent)
+	counters.CPUUserTime = CPUTime{
+		TotalTime: stats.CPUStats.TotalUserTime,
+		Hz:        sample.UserHz,
+		Percent:   sample.UserPercent,
+	}
+	counters.CPUKernelTime = CPUTime{
+		TotalTime: stats.CPUStats.TotalKernelTime,
+		Hz:        sample.KernelHz,
+		Percent:   sample.KernelPercent,
+	}
+	counters.CPUTotalTime = stats.CPUStats.TotalCPUTime
 	// memory
 	m.memoryCommitCharge.Set(float64(stats.MemoryStats.PrivateUsageBytes))
 	m.memoryWorkingSet.Set(float64(stats.MemoryStats.WorkingSetSizeBytes))
 	m.memoryPageFaultCount.Set(float64(stats.MemoryStats.PageFaultCount))
+	m.memoryPeakPagefileUsage.Set(float64(stats.MemoryStats.PeakPagefileUsageBytes))
+	m.memoryPeakWorkingSet.Set(float64(stats.MemoryStats.PeakWorkingSetSizeBytes))
+	m.memoryPeakNonPagedPoolUsage.Set(float64(stats.MemoryStats.PeakNonPagedPoolUsageBytes))
+	m.memoryNonPagedPoolUsage.Set(float64(stats.MemoryStats.NonPagedPoolUsageBytes))
+	m.memoryPeakPagedPoolUsage.Set(float64(stats.MemoryStats.PeakPagedPoolUsageBytes))
+	m.memoryPagedPoolUsage.Set(float64(stats.MemoryStats.PagedPoolUsageBytes))
+	counters.MemoryPrivateUsageBytes = stats.MemoryStats.PrivateUsageBytes
+	counters.MemoryPeakWorkingSetBytes = stats.MemoryStats.PeakWorkingSetSizeBytes
+	counters.MemoryWorkingSetBytes = stats.MemoryStats.WorkingSetSizeBytes
+	counters.MemoryPeakPagefileUsageBytes = stats.MemoryStats.PeakWorkingSetSizeBytes
+	counters.MemoryPageFaults = stats.MemoryStats.PageFaultCount
+	counters.MemoryPeakNonPagedPoolUsageBytes = stats.MemoryStats.PeakNonPagedPoolUsageBytes
+	counters.MemoryNonPagedPoolUsageBytes = stats.MemoryStats.NonPagedPoolUsageBytes
+	counters.MemoryPeakPagedPoolUsageBytes = stats.MemoryStats.PeakPagedPoolUsageBytes
+	counters.MemoryPagedPoolUsageBytes = stats.MemoryStats.PagedPoolUsageBytes
 	// io
 	m.ioTxReadBytes.Set(float64(stats.IOStats.TotalTxReadBytes))
 	m.ioTxWriteBytes.Set(float64(stats.IOStats.TotalTxWrittenBytes))
@@ -246,17 +334,73 @@ func (m *Metrics) OnStats(stats container.ProcessStats) {
 	m.ioWriteOpsTotal.Set(float64(stats.IOStats.TotalWriteIOOperations))
 	m.ioOtherOpsTotal.Set(float64(stats.IOStats.TotalOtherIOOperations))
 	m.ioTotalOperations.Set(float64(stats.IOStats.TotalIOOperations))
+	counters.IOTxReadBytes = stats.IOStats.TotalTxReadBytes
+	counters.IOTxWriteBytes = stats.IOStats.TotalTxWrittenBytes
+	counters.IOTxOtherBytes = stats.IOStats.TotalTxOtherBytes
+	counters.IOTxTotalBytes = stats.IOStats.TotalTxCountBytes
+	counters.IOReadOpsTotal = stats.IOStats.TotalReadIOOperations
+	counters.IOWriteOpsTotal = stats.IOStats.TotalWriteIOOperations
+	counters.IOOtherOpsTotal = stats.IOStats.TotalOtherIOOperations
+	counters.IOTotalOperations = stats.IOStats.TotalIOOperations
+	m.perfCounters.Store(counters)
 }
 
 func (m *Metrics) OnViolation(v container.LimitViolation) {
+	m.perfLock.Lock()
+	defer m.perfLock.Unlock()
+	counters := m.PerfCounters()
 	switch v.Type {
 	case container.IOLimitViolation:
 		m.ioNotification.Inc()
+		counters.IOViolations++
 	case container.CPULimitViolation:
 		m.cpuNotification.Inc()
+		counters.CPUViolations++
 	case container.MemoryLimitViolation:
 		m.memoryNotification.Inc()
+		counters.MemoryViolations++
 	}
+	m.perfCounters.Store(counters)
+}
+
+func (m *Metrics) PerfCounters() PerfCounters {
+	return (m.perfCounters.Load()).(PerfCounters)
+}
+
+type PerfCounters struct {
+	TimeStamp time.Time
+	// cpu
+	CPUUserTime   CPUTime
+	CPUKernelTime CPUTime
+	CPUTotalTime  time.Duration
+	CPUViolations uint64
+	// memory
+	MemoryPrivateUsageBytes          uint64
+	MemoryPeakPagefileUsageBytes     uint64
+	MemoryWorkingSetBytes            uint64
+	MemoryPeakWorkingSetBytes        uint64
+	MemoryPeakPagedPoolUsageBytes    uint64
+	MemoryPagedPoolUsageBytes        uint64
+	MemoryPeakNonPagedPoolUsageBytes uint64
+	MemoryNonPagedPoolUsageBytes     uint64
+	MemoryPageFaults                 uint64
+	MemoryViolations                 uint64
+	// io
+	IOTxReadBytes     uint64
+	IOTxWriteBytes    uint64
+	IOTxOtherBytes    uint64
+	IOTxTotalBytes    uint64
+	IOReadOpsTotal    uint64
+	IOWriteOpsTotal   uint64
+	IOOtherOpsTotal   uint64
+	IOTotalOperations uint64
+	IOViolations      uint64
+}
+
+type CPUTime struct {
+	TotalTime time.Duration
+	Hz        uint64
+	Percent   float64
 }
 
 func (m *Metrics) Handler() http.Handler {
@@ -300,7 +444,7 @@ func (c *CPUCollector) Sample(m CPUMeasurement) CPUSample {
 	c.lock.Unlock()
 
 	// total cpu time = total time * num cores
-	ttime := (m.TotalTime - t0) * time.Duration(c.Cores)
+	ttime := (m.TotalTime - t0)
 	tmhz := c.MHzPerCore * float64(c.Cores)
 
 	kperc := float64(m.KernelTime-k0) / float64(ttime)
