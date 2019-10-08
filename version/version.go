@@ -12,7 +12,7 @@ var (
 	GitDescribe string
 
 	// Number is the base semantic version number of the project
-	Number = "0.1.0"
+	Number = "0.1.1"
 
 	// PreRelease is the pre-release information for this version
 	PreRelease = ""
