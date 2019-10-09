@@ -4,8 +4,9 @@ clone_folder: c:\gopath\src\github.com\jet\damon
 environment:
   GOPATH: c:\gopath
   GOBIN: c:\gopath\bin
-image: Visual Studio 2017
+image: Visual Studio 2019
 install:
+  - ps: choco install --limitoutput -y --version=1.13.1 golang
   - cmd: set PATH=%GOBIN%;c:\go\bin;%PATH%
   - cmd: echo %Path%
   - cmd: go version
