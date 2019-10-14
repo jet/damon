@@ -62,10 +62,12 @@ func main() {
 		labels[k] = fmt.Sprintf("%v", v)
 	}
 	m := metrics.Metrics{
-		Cores:      resources.CPUNumCores,
-		MHzPerCore: resources.CPUMhzPercore,
-		Namespace:  "damon",
-		Labels:     labels,
+		Cores:            resources.CPUNumCores,
+		MHzPerCore:       resources.CPUMhzPercore,
+		CpuLimitHz:       float64(ccfg.CPUMHzLimit * 1000000),
+		MemoryLimitBytes: float64(ccfg.MemoryMBLimit * 1024 * 1024),
+		Namespace:        "damon",
+		Labels:           labels,
 	}
 	m.Init()
 	c := container.Container{
@@ -96,11 +98,11 @@ func main() {
 			mux := http.NewServeMux()
 			mux.Handle(endpoint, m.Handler())
 			srv := &http.Server{
-				Addr: addr,
+				Addr:    addr,
 				Handler: mux,
 			}
-			logger.Logf("metrics on http://%s/%s",addr,endpoint)
-			logger.Error(srv.ListenAndServe(),"error closing http server")
+			logger.Logf("metrics on http://%s/%s", addr, endpoint)
+			logger.Error(srv.ListenAndServe(), "error closing http server")
 		}()
 	}
 	pr, err := c.Wait(exitCh)

@@ -6,15 +6,17 @@ import (
 	"time"
 
 	"github.com/jet/damon/container"
-	"github.com/prometheus/client_golang/prometheus" 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type Metrics struct {
-	Namespace  string
-	Labels     map[string]string
-	MHzPerCore float64
-	Cores      int
+	Namespace        string
+	Labels           map[string]string
+	MHzPerCore       float64
+	Cores            int
+	CpuLimitHz       float64
+	MemoryLimitBytes float64
 
 	cpuCollector *CPUCollector
 	registry     *prometheus.Registry
@@ -27,23 +29,26 @@ type Metrics struct {
 	cpuUserPercent   prometheus.Gauge
 	cpuKernelHz      prometheus.Gauge
 	cpuUserHz        prometheus.Gauge
+	cpuLimitHz       prometheus.Gauge
+	cpuLimitPercent  prometheus.Gauge
 	cpuNotification  prometheus.Counter
 
 	// memory
 	memoryWorkingSet     prometheus.Gauge
 	memoryCommitCharge   prometheus.Gauge
 	memoryPageFaultCount prometheus.Gauge
+	memoryLimitBytes     prometheus.Gauge
 	memoryNotification   prometheus.Counter
 
 	// io
-	ioTxTotalBytes     prometheus.Gauge
+	ioTxTotalBytes    prometheus.Gauge
 	ioTxReadBytes     prometheus.Gauge
 	ioTxWriteBytes    prometheus.Gauge
 	ioTxOtherBytes    prometheus.Gauge
-	ioReadOpsTotal  prometheus.Gauge
-	ioWriteOpsTotal prometheus.Gauge
-	ioOtherOpsTotal prometheus.Gauge
-	ioTotalOperations    prometheus.Gauge
+	ioReadOpsTotal    prometheus.Gauge
+	ioWriteOpsTotal   prometheus.Gauge
+	ioOtherOpsTotal   prometheus.Gauge
+	ioTotalOperations prometheus.Gauge
 	ioNotification    prometheus.Counter
 }
 
@@ -53,7 +58,7 @@ func (m *Metrics) Init() {
 		Cores:      m.Cores,
 	}
 	m.registry = prometheus.NewRegistry()
-	m.handler = promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{}) 
+	m.handler = promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
 	m.cpuKernelTime = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace:   m.Namespace,
 		Subsystem:   "cpu",
@@ -102,6 +107,22 @@ func (m *Metrics) Init() {
 		ConstLabels: prometheus.Labels(m.Labels),
 	})
 	m.registry.MustRegister(m.cpuUserHz)
+	m.cpuLimitHz = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "cpu",
+		Name:        "limit_hz",
+		Help:        "The configured CPU usage limit in Hz.",
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.cpuLimitHz)
+	m.cpuLimitPercent = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "cpu",
+		Name:        "limit_percent",
+		Help:        "The configured CPU usage limit as a percentage of total system Hz available.",
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.cpuLimitPercent)
 	m.cpuNotification = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace:   m.Namespace,
 		Subsystem:   "cpu",
@@ -134,6 +155,14 @@ func (m *Metrics) Init() {
 		ConstLabels: prometheus.Labels(m.Labels),
 	})
 	m.registry.MustRegister(m.memoryPageFaultCount)
+	m.memoryLimitBytes = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace:   m.Namespace,
+		Subsystem:   "memory",
+		Name:        "limit_bytes",
+		Help:        "The configured Memory limit in bytes.",
+		ConstLabels: prometheus.Labels(m.Labels),
+	})
+	m.registry.MustRegister(m.memoryLimitBytes)
 	m.memoryNotification = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace:   m.Namespace,
 		Subsystem:   "memory",
@@ -233,10 +262,13 @@ func (m *Metrics) OnStats(stats container.ProcessStats) {
 	m.cpuKernelPercent.Set(sample.KernelPercent)
 	m.cpuUserHz.Set(float64(sample.UserHz))
 	m.cpuUserPercent.Set(sample.UserPercent)
+	m.cpuLimitHz.Set(m.CpuLimitHz)
+	m.cpuLimitPercent.Set(m.CpuLimitHz / (m.MHzPerCore * float64(m.Cores) * 1000000.0))
 	// memory
 	m.memoryCommitCharge.Set(float64(stats.MemoryStats.PrivateUsageBytes))
 	m.memoryWorkingSet.Set(float64(stats.MemoryStats.WorkingSetSizeBytes))
 	m.memoryPageFaultCount.Set(float64(stats.MemoryStats.PageFaultCount))
+	m.memoryLimitBytes.Set(m.MemoryLimitBytes)
 	// io
 	m.ioTxReadBytes.Set(float64(stats.IOStats.TotalTxReadBytes))
 	m.ioTxWriteBytes.Set(float64(stats.IOStats.TotalTxWrittenBytes))
