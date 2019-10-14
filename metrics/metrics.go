@@ -15,7 +15,7 @@ type Metrics struct {
 	Labels           map[string]string
 	MHzPerCore       float64
 	Cores            int
-	CpuLimitHz       float64
+	CPULimitHz       float64
 	MemoryLimitBytes float64
 
 	cpuCollector *CPUCollector
@@ -262,8 +262,8 @@ func (m *Metrics) OnStats(stats container.ProcessStats) {
 	m.cpuKernelPercent.Set(sample.KernelPercent)
 	m.cpuUserHz.Set(float64(sample.UserHz))
 	m.cpuUserPercent.Set(sample.UserPercent)
-	m.cpuLimitHz.Set(m.CpuLimitHz)
-	m.cpuLimitPercent.Set(m.CpuLimitHz / (m.MHzPerCore * float64(m.Cores) * 1000000.0))
+	m.cpuLimitHz.Set(m.CPULimitHz)
+	m.cpuLimitPercent.Set(m.CPULimitHz / (m.MHzPerCore * float64(m.Cores) * 1000000.0))
 	// memory
 	m.memoryCommitCharge.Set(float64(stats.MemoryStats.PrivateUsageBytes))
 	m.memoryWorkingSet.Set(float64(stats.MemoryStats.WorkingSetSizeBytes))

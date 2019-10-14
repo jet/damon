@@ -64,7 +64,7 @@ func main() {
 	m := metrics.Metrics{
 		Cores:            resources.CPUNumCores,
 		MHzPerCore:       resources.CPUMhzPercore,
-		CpuLimitHz:       float64(ccfg.CPUMHzLimit * 1000000),
+		CPULimitHz:       float64(ccfg.CPUMHzLimit * 1000000),
 		MemoryLimitBytes: float64(ccfg.MemoryMBLimit * 1024 * 1024),
 		Namespace:        "damon",
 		Labels:           labels,
